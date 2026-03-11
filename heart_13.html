@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>蛮子 · 在线音乐版</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Arial Black', 'PingFang SC', sans-serif; background-color: black; }
+        #info {
+            position: absolute; top: 20px; left: 20px; color: rgba(200,220,255,0.7);
+            background: rgba(0,0,0,0.5); padding: 8px 18px; border-radius: 40px;
+            backdrop-filter: blur(5px); z-index: 10; border: 1px solid rgba(180,200,255,0.2);
+            font-size: 14px; letter-spacing: 1px;
+        }
+        /* 爱心播放按钮 */
+        #play-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100px;
+            height: 90px;
+            cursor: pointer;
+            z-index: 100;
+            filter: drop-shadow(0 0 20px #ff99cc);
+            transition: opacity 0.5s ease;
+            animation: heartbeat 1.5s ease-in-out infinite;
+        }
+        #play-btn.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        /* 使用CSS绘制爱心 */
+        .heart {
+            width: 100px;
+            height: 90px;
+            position: relative;
+        }
+        .heart:before,
+        .heart:after {
+            content: "";
+            position: absolute;
+            top: 0;
+            width: 52px;
+            height: 80px;
+            border-radius: 50px 50px 0 0;
+            background: linear-gradient(145deg, #ff88aa, #ff3366);
+            box-shadow: 0 0 40px #ff3366;
+        }
+        .heart:before {
+            left: 50px;
+            transform: rotate(-45deg);
+            transform-origin: 0 100%;
+        }
+        .heart:after {
+            left: 0;
+            transform: rotate(45deg);
+            transform-origin: 100% 100%;
+        }
+        /* 心跳动画 */
+        @keyframes heartbeat {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            30% { transform: translate(-50%, -50%) scale(1.1); }
+            50% { transform: translate(-50%, -50%) scale(1); }
+            70% { transform: translate(-50%, -50%) scale(1.05); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div id="info">💙 点击爱心播放音乐 💙</div>
+    <!-- 爱心播放按钮 -->
+    <div id="play-btn" class="heart"></div>
+
+    <!-- 引入 Three.js 核心库 -->
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- 初始化场景、相机、渲染器 (针对手机优化) ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050510); // 深蓝黑底色
+        
+        // 根据屏幕宽高比动态调整相机距离，确保爱心完整显示
+        let cameraDistance = 9.5;
+        const aspect = window.innerWidth / window.innerHeight;
+        if (aspect < 0.6) cameraDistance = 11;      // 窄竖屏
+        else if (aspect < 0.9) cameraDistance = 10; // 一般竖屏
+        
+        const camera = new THREE.PerspectiveCamera(55, aspect, 0.1, 1000);
+        camera.position.set(3.5, 1.2, cameraDistance);
+        camera.lookAt(0, 0.2, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        // --- 创建发光粒子纹理 ---
+        function createGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32;
+            canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.clearRect(0, 0, 32, 32);
+            const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 18);
+            gradient.addColorStop(0, 'rgba(220,230,255,1)');
+            gradient.addColorStop(0.5, 'rgba(150,180,255,0.8)');
+            gradient.addColorStop(1, 'rgba(80,100,180,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 32, 32);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.fillRect(13, 13, 6, 6);
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+        const particleTexture = createGlowTexture();
+
+        // --- 生成心形粒子数据 (12000个，忧伤蓝紫色调) ---
+        const particleCount = 12000;
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+        const baseHues = new Float32Array(particleCount);
+
+        const scale = 0.24;
+        const offsetRange = 0.6;
+        const zRange = 2.8;
+
+        const minHue = 0.55;
+        const maxHue = 0.85;
+        const hueRange = maxHue - minHue;
+
+        for (let i = 0; i < particleCount; i++) {
+            const t = Math.random() * Math.PI * 2;
+            const xBase = 16 * Math.pow(Math.sin(t), 3);
+            const yBase = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+            
+            const offsetX = (Math.random() - 0.5) * offsetRange * 2.5;
+            const offsetY = (Math.random() - 0.5) * offsetRange * 2.5;
+            const offsetZ = (Math.random() - 0.5) * zRange * 1.2;
+            
+            let x = (xBase + offsetX) * scale;
+            let y = (yBase + offsetY) * scale;
+            let z = offsetZ;
+            
+            positions[i*3] = x;
+            positions[i*3+1] = y;
+            positions[i*3+2] = z;
+            
+            baseHues[i] = minHue + Math.random() * hueRange;
+        }
+
+        const heartGeometry = new THREE.BufferGeometry();
+        heartGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        heartGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        heartGeometry.userData.baseHues = baseHues;
+
+        const heartMaterial = new THREE.PointsMaterial({
+            size: 0.15,
+            map: particleTexture,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            vertexColors: true,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.9
+        });
+
+        const heartParticles = new THREE.Points(heartGeometry, heartMaterial);
+        
+        const heartGroup = new THREE.Group();
+        heartGroup.add(heartParticles);
+        heartGroup.rotation.x = 0.15;
+        heartGroup.rotation.y = 0.4;
+        heartGroup.rotation.z = 0.1;
+        scene.add(heartGroup);
+
+        // --- 线框爱心 ---
+        const linePoints = [];
+        const steps = 200;
+        for (let i = 0; i <= steps; i++) {
+            const t = (i / steps) * Math.PI * 2;
+            const x = 16 * Math.pow(Math.sin(t), 3) * scale;
+            const y = (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) * scale;
+            linePoints.push(new THREE.Vector3(x, y, 0));
+        }
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x6688aa, opacity: 0.25, transparent: true });
+        const heartLine = new THREE.LineLoop(lineGeometry, lineMaterial);
+        heartLine.position.z = 0;
+        heartGroup.add(heartLine);
+
+        // --- 光环1 (蓝紫色) ---
+        const ringCount1 = 2000;
+        const ringGeo1 = new THREE.BufferGeometry();
+        const ringPos1 = new Float32Array(ringCount1 * 3);
+        const ringCol1 = new Float32Array(ringCount1 * 3);
+        const ringHues1 = new Float32Array(ringCount1);
+        for (let i = 0; i < ringCount1; i++) {
+            const radius = 4.0 + Math.random() * 1.5;
+            const angle = Math.random() * Math.PI * 2;
+            const height = (Math.random() - 0.5) * 3.5;
+            ringPos1[i*3] = Math.cos(angle) * radius;
+            ringPos1[i*3+1] = height * 0.8;
+            ringPos1[i*3+2] = Math.sin(angle) * radius;
+            ringHues1[i] = minHue + Math.random() * hueRange;
+        }
+        ringGeo1.setAttribute('position', new THREE.BufferAttribute(ringPos1, 3));
+        ringGeo1.setAttribute('color', new THREE.BufferAttribute(ringCol1, 3));
+        ringGeo1.userData.baseHues = ringHues1;
+        const ringMat1 = new THREE.PointsMaterial({ size: 0.12, map: particleTexture, blending: THREE.AdditiveBlending, vertexColors: true, sizeAttenuation: true, transparent: true, depthWrite: false, opacity: 0.6 });
+        const ring1 = new THREE.Points(ringGeo1, ringMat1);
+        scene.add(ring1);
+
+        // --- 光环2 (青灰色) ---
+        const ringCount2 = 1200;
+        const ringGeo2 = new THREE.BufferGeometry();
+        const ringPos2 = new Float32Array(ringCount2 * 3);
+        const ringCol2 = new Float32Array(ringCount2 * 3);
+        const ringHues2 = new Float32Array(ringCount2);
+        const minHue2 = 0.45;
+        const maxHue2 = 0.65;
+        const hueRange2 = maxHue2 - minHue2;
+        for (let i = 0; i < ringCount2; i++) {
+            const radius = 2.8 + Math.random() * 1.2;
+            const angle = Math.random() * Math.PI * 2;
+            const height = (Math.random() - 0.5) * 2.5;
+            ringPos2[i*3] = Math.cos(angle) * radius;
+            ringPos2[i*3+1] = height * 1.2;
+            ringPos2[i*3+2] = Math.sin(angle) * radius;
+            ringHues2[i] = minHue2 + Math.random() * hueRange2;
+        }
+        ringGeo2.setAttribute('position', new THREE.BufferAttribute(ringPos2, 3));
+        ringGeo2.setAttribute('color', new THREE.BufferAttribute(ringCol2, 3));
+        ringGeo2.userData.baseHues = ringHues2;
+        const ringMat2 = new THREE.PointsMaterial({ size: 0.1, map: particleTexture, blending: THREE.AdditiveBlending, vertexColors: true, sizeAttenuation: true, transparent: true, depthWrite: false, opacity: 0.7 });
+        const ring2 = new THREE.Points(ringGeo2, ringMat2);
+        scene.add(ring2);
+
+        // --- 背景星星 ---
+        const starCount = 3000;
+        const starGeo = new THREE.BufferGeometry();
+        const starPos = new Float32Array(starCount * 3);
+        const starCol = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const r = 30 + Math.random() * 40;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            starPos[i*3] = r * Math.sin(phi) * Math.cos(theta);
+            starPos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+            starPos[i*3+2] = r * Math.cos(phi);
+            const hue = 0.6 + Math.random() * 0.2;
+            const col = new THREE.Color().setHSL(hue, 0.3, 0.6 + Math.random()*0.3);
+            starCol[i*3] = col.r; starCol[i*3+1] = col.g; starCol[i*3+2] = col.b;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(starCol, 3));
+        const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 0.22, map: particleTexture, blending: THREE.AdditiveBlending, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.6, depthWrite: false }));
+        scene.add(stars);
+
+        // ========== 音乐播放控制（使用在线音频链接，手机可直接访问）==========
+        const audio = new Audio();
+        // 使用一个免费的、忧伤风格的在线音乐（无版权问题）
+        audio.src = 'https://store5.gofile.io/content/web/8b8fbc74-2c0e-4d0e-a9f7-55f2771cbf09/tianfu.mp3'; // 可替换为您的在线音乐链接
+        // 如果您有自己的在线音乐，请将上面链接替换为您的直链，例如：
+        // audio.src = 'https://gofile.io/d/ciDiqO/tianfu.mp3';
+        
+        audio.volume = 0.5;
+        audio.loop = true;
+        
+        // 预加载
+        audio.load();
+
+        // 获取爱心按钮
+        const playBtn = document.getElementById('play-btn');
+
+        // 按钮点击事件
+        playBtn.addEventListener('click', () => {
+            // 隐藏按钮
+            playBtn.classList.add('hidden');
+            
+            // 直接播放
+            audio.play().then(() => {
+                console.log('音乐播放成功');
+            }).catch(error => {
+                console.error('播放失败详情:', error);
+                alert('音乐播放失败：' + error.message + '\n可能是网络问题或链接失效，请稍后重试。');
+                // 播放失败，让按钮重新出现，以便再次尝试
+                playBtn.classList.remove('hidden');
+            });
+        });
+
+        // 可选：尝试自动播放（但移动端大概率失败，不依赖）
+        // 直接移除之前的自动播放代码
+
+        // ========== 动画循环 ==========
+        const clock = new THREE.Clock();
+        const tempColor = new THREE.Color();
+
+        const sadMinHue = 0.55;
+        const sadMaxHue = 0.85;
+        const sadHueRange = sadMaxHue - sadMinHue;
+        const sadMinHue2 = 0.45;
+        const sadMaxHue2 = 0.65;
+        const sadHueRange2 = sadMaxHue2 - sadMinHue2;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const elapsed = performance.now() / 1000;
+
+            const hueShift = (elapsed * 0.06) % 1.0;
+            const hueShiftRing1 = (elapsed * 0.08) % 1.0;
+            const hueShiftRing2 = (elapsed * 0.05) % 1.0;
+            const hueShiftLine = (elapsed * 0.07) % 1.0;
+
+            // 更新爱心粒子颜色
+            const heartBaseHues = heartGeometry.userData.baseHues;
+            const heartColorAttr = heartGeometry.attributes.color;
+            const heartColorArray = heartColorAttr.array;
+            for (let i = 0; i < particleCount; i++) {
+                let rawHue = (heartBaseHues[i] + hueShift) % 1.0;
+                let hue = sadMinHue + (rawHue * sadHueRange);
+                tempColor.setHSL(hue, 0.5, 0.55);
+                heartColorArray[i*3] = tempColor.r;
+                heartColorArray[i*3+1] = tempColor.g;
+                heartColorArray[i*3+2] = tempColor.b;
+            }
+            heartColorAttr.needsUpdate = true;
+
+            // 更新光环1颜色
+            const ring1BaseHues = ringGeo1.userData.baseHues;
+            const ring1ColorAttr = ringGeo1.attributes.color;
+            const ring1ColorArray = ring1ColorAttr.array;
+            for (let i = 0; i < ringCount1; i++) {
+                let rawHue = (ring1BaseHues[i] + hueShiftRing1) % 1.0;
+                let hue = sadMinHue + (rawHue * sadHueRange);
+                tempColor.setHSL(hue, 0.5, 0.6);
+                ring1ColorArray[i*3] = tempColor.r;
+                ring1ColorArray[i*3+1] = tempColor.g;
+                ring1ColorArray[i*3+2] = tempColor.b;
+            }
+            ring1ColorAttr.needsUpdate = true;
+
+            // 更新光环2颜色
+            const ring2BaseHues = ringGeo2.userData.baseHues;
+            const ring2ColorAttr = ringGeo2.attributes.color;
+            const ring2ColorArray = ring2ColorAttr.array;
+            for (let i = 0; i < ringCount2; i++) {
+                let rawHue = (ring2BaseHues[i] + hueShiftRing2) % 1.0;
+                let hue = sadMinHue2 + (rawHue * sadHueRange2);
+                tempColor.setHSL(hue, 0.4, 0.55);
+                ring2ColorArray[i*3] = tempColor.r;
+                ring2ColorArray[i*3+1] = tempColor.g;
+                ring2ColorArray[i*3+2] = tempColor.b;
+            }
+            ring2ColorAttr.needsUpdate = true;
+
+            // 线框爱心变色
+            tempColor.setHSL(sadMinHue + (hueShiftLine * sadHueRange), 0.4, 0.6);
+            heartLine.material.color.set(tempColor);
+            heartLine.material.opacity = 0.2 + 0.1 * Math.sin(elapsed * 2);
+
+            // 旋转与浮动
+            heartGroup.rotation.y += 0.0008;
+            heartGroup.position.y = Math.sin(elapsed * 0.8) * 0.15;
+
+            ring1.rotation.y += 0.002;
+            ring1.rotation.x += 0.0005;
+            ring2.rotation.y -= 0.003;
+            ring2.rotation.z += 0.001;
+
+            stars.rotation.y += 0.00005;
+            stars.rotation.x += 0.00002;
+
+            // 相机运动（基于动态距离）
+            camera.position.x = 3.8 * Math.sin(elapsed * 0.12);
+            camera.position.z = cameraDistance + 0.5 * Math.sin(elapsed * 0.25);
+            camera.position.y = 1.3 + Math.sin(elapsed * 0.3) * 0.2;
+            camera.lookAt(heartGroup.position.x, heartGroup.position.y + 0.3, heartGroup.position.z);
+
+            heartMaterial.size = 0.14 + 0.02 * Math.sin(elapsed * 5);
+
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+
+        // --- 自适应窗口 (横竖屏切换时调整相机距离) ---
+        window.addEventListener('resize', () => {
+            const newAspect = window.innerWidth / window.innerHeight;
+            camera.aspect = newAspect;
+            
+            if (newAspect < 0.6) cameraDistance = 11;
+            else if (newAspect < 0.9) cameraDistance = 10;
+            else cameraDistance = 9.5;
+            
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 阻止移动端滑动页面
+        window.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+    </script>
+</body>
+</html>
